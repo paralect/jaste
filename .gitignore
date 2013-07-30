@@ -1,0 +1,12 @@
+target/
+node_modules/
+
+.idea/workspace.xml
+.idea/libraries/
+.idea/dictionaries/
+
+*.log
+*.autosave
+*~
+
+*.kate-swp
