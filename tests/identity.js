@@ -3,26 +3,10 @@ var fs = require('fs');
 var path = require('path');
 var jaste = require('../jaste');
 
-function identical(testName, source) {
-    it(testName, function () {
-        var syntax = jaste.generate(source);
-        assert.equal(syntax, source);
-    });
-}
-
-function identicalFile(testName, filePath) {
-    it(testName, function (done) {
-        fs.readFile(filePath, 'utf8', function (error, source) {
-            if (error)
-                throw error;
-
-            var program = jaste.generate(source);
-            assert.equal(program, source);
-            done();
-        });
-    });
-}
-
+/**
+ * Identity tests. We are checking here that any valid
+ * javascript code is a valid jaste code.
+ */
 describe('Identical', function() {
 
     identical("empty",
@@ -106,15 +90,32 @@ describe('Identical', function() {
         path.resolve(__dirname, 'files/Angular.js'));
 })
 
-describe('simple', function() {
-    it('should aga', function() {
-        assert.equal(1, 1);
-
+/**
+ * Checks that generated source is identical to the passed one.
+ * @param {string} testName Name of test
+ * @param {string} source Source text
+ */
+function identical(testName, source) {
+    it(testName, function () {
+        var syntax = jaste.generate(source);
+        assert.equal(syntax, source);
     });
+}
 
-    it('should wait', function(done) {
-        setTimeout(function() {
+/**
+ * Checks that generated source is identical to the content of passed file.
+ * @param {string} testName Name of test
+ * @param {string} filePath Absolute path to the file.
+ */
+function identicalFile(testName, filePath) {
+    it(testName, function (done) {
+        fs.readFile(filePath, 'utf8', function (error, source) {
+            if (error)
+                throw error;
+
+            var program = jaste.generate(source);
+            assert.equal(program, source);
             done();
-        }, 10);
+        });
     });
-})
+}

@@ -16,6 +16,10 @@
         return esprima.parse(str, { comment : true, tokens : true, loc : true });
     }
 
+    function parseFull(str) {
+        return esprima.parse(str, { comment : true, tokens : true, loc : true, range : true });
+    }
+
     function generate(str) {
         var syntax = parse(str);
         return syntax.program;
@@ -24,4 +28,5 @@
     exports.version = '0.0.1';
     exports.generate = generate;
     exports.parse = parse;
+    exports.parseFull = parseFull;
 }));
