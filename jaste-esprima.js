@@ -114,7 +114,8 @@ parseStatement: true, parseSourceElement: true */
         AssignmentExpression: 'AssignmentExpression',
         ArrayExpression: 'ArrayExpression',
         BlockStatement: 'BlockStatement',
-        TextStatement: 'TextStatement',
+        JasteTextBlockStatement: 'JasteTextBlockStatement',
+        JasteTextStatement: 'JasteTextStatement',
         BinaryExpression: 'BinaryExpression',
         BreakStatement: 'BreakStatement',
         CallExpression: 'CallExpression',
@@ -1464,10 +1465,17 @@ parseStatement: true, parseSourceElement: true */
             };
         },
 
-        createTextStatement: function (body) {
+        createJasteTextBlockStatement: function (body) {
             return {
-                type: Syntax.TextStatement,
-                text: body
+                type: Syntax.JasteTextBlockStatement,
+                body: body
+            };
+        },
+
+        createJasteTextStatement: function (text) {
+            return {
+                type: Syntax.JasteTextStatement,
+                text: text
             };
         },
 
@@ -2586,7 +2594,7 @@ parseStatement: true, parseSourceElement: true */
             if (match('}')) {
                 break;
             }
-            statement = parseSourceElement();
+            statement = parseSourceElement(true);
             if (typeof statement === 'undefined') {
                 break;
             }
@@ -2610,25 +2618,81 @@ parseStatement: true, parseSourceElement: true */
         return delegate.markEnd(delegate.createBlockStatement(block));
     }
 
-    function parseText() {
-        var text;
+    /**
+     * Jaste Context
+     * {
+     *
+     * }
+     */
 
-        skipComment();
-        delegate.markStart();
-//        expect('<');
+    /**
+     * Returns the following object:
+     * {
+     *     name : "tagName",
+     *     end : intEnd
+     * }
+     */
+    function readTextTagName(from) {
+        var start = from, i = from, ch, text;
 
-        var start = index, loc, ch, comment;
+        // skip '<' symbol
+        ++i;
 
-        /*
-        if (extra.comments) {
-            start = index - 2;
-            loc = {
-                start: {
-                    line: lineNumber,
-                    column: index - lineStart - 2
+        while (i < length) {
+            ch = source.charCodeAt(i);
+
+            // if end of name reached
+            if (ch === 62 || ch === 32) { // '>' and ' '
+                text = source.slice(start + 1, i);
+                return {
+                    name : text,
+                    end : i + 1
                 }
-            };
-        }   */
+            }
+
+            ++i;
+        }
+    }
+
+    function jasteIsTagNameStart(ch) {
+        return (ch === 95) ||  // _ (underscore)
+            (ch >= 65 && ch <= 90) ||         // A..Z
+            (ch >= 97 && ch <= 122) ||        // a..z
+            (ch === 92) ||                    // \ (backslash)
+            ((ch >= 0x80) && Regex.NonAsciiIdentifierStart.test(String.fromCharCode(ch)));
+    }
+
+    function jasteIsTagNamePart(ch) {
+        return (ch === 36) || (ch === 95) ||  // $ (dollar) and _ (underscore)
+            (ch >= 65 && ch <= 90) ||         // A..Z
+            (ch >= 97 && ch <= 122) ||        // a..z
+            (ch >= 48 && ch <= 57) ||         // 0..9
+            (ch === 92) ||                    // \ (backslash)
+            ((ch >= 0x80) && Regex.NonAsciiIdentifierPart.test(String.fromCharCode(ch)));
+    }
+
+    function jasteExpect(token) {
+        var start = index, actual, expected;
+        while (index < length && (index - start) < token.length) {
+            actual = source.charCodeAt(index);
+            expected = token.charCodeAt(index - start);
+            if (actual !== expected)
+                throwError({}, Messages.UnexpectedToken, 'ILLEGAL');
+            ++index;
+        }
+    }
+
+    function jasteCheckCurrentSymbol(symbol) {
+        var ch = source.charCodeAt(index);
+
+
+    }
+
+    /**
+     * Skip HTML comment (<!-- ... -->
+     */
+    function jasteSkipMultiLineComment() {
+        var start, loc, ch, comment;
 
         while (index < length) {
             ch = source.charCodeAt(index);
@@ -2642,30 +2706,328 @@ parseStatement: true, parseSourceElement: true */
                 if (index >= length) {
                     throwError({}, Messages.UnexpectedToken, 'ILLEGAL');
                 }
-            } else if (ch === 62) {  // '>' is #62
-                // Block comment ends with '*/' (char #42, char #47).
+            } else if (ch === 45) { // '-'
+                // Block comment ends with '-->' (char #45, char #45, char #62).
+                if (source.charCodeAt(index + 1) === 45 &&
+                    source.charCodeAt(index + 2) === 62) {
+                    index += 3;
+/*                    if (extra.comments) {
+                        comment = source.slice(start + 2, index - 2);
+                        loc.end = {
+                            line: lineNumber,
+                            column: index - lineStart
+                        };
+                        addComment('Block', comment, start, index, loc);
+                    }*/
+                    return;
+                }
                 ++index;
-                if (true) {
-                    text = source.slice(start + 1, index - 1);
-/*                    loc.end = {
-                        line: lineNumber,
-                        column: index - lineStart
-                    };
-                    addComment('Block', comment, start, index, loc);*/
+            } else {
+                ++index;
+            }
+        }
+    }
+
+    /**
+     * Skip all whitespaces and HTML comments (<!-- ... -->)
+     * @param insideTag if true, do not accept HTML comments (you cannot use HTML
+     * comments inside HTML tags.
+     */
+    function jasteSkipSpaces(insideTag) {
+        var ch;
+        var start = index;
+
+        while (index < length) {
+            ch = source.charCodeAt(index);
+
+            if (isWhiteSpace(ch)) {
+                ++index;
+            } else if (isLineTerminator(ch)) {
+                ++index;
+                if (ch === 13 && source.charCodeAt(index) === 10) {
+                    ++index;
+                }
+                ++lineNumber;
+                lineStart = index;
+            } else if (!insideTag && ch === 60) { // 47 is '<'
+                var ch1 = source.charCodeAt(index + 1);
+                var ch2 = source.charCodeAt(index + 2);
+                var ch3 = source.charCodeAt(index + 3);
+                if (ch1 === 33 && ch2 === 45 && ch3 === 45) {  // '!', '-', '-'
+                    index += 4;
+                    jasteSkipMultiLineComment();
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+    }
+
+    function parseTagContent() {
+
+    }
+
+    function jasteParseTagAttributeValueData(quote) {
+        // index points to the first char in attribute value
+        var start = index, ch;
+        quote = quote || -1;
+
+        while (index < length) {
+            ch = source.charCodeAt(index);
+
+            if ((quote === -1 && (ch === 62 || isWhiteSpace(ch)))       // '>'
+                || (ch === quote || ch === 62 || isWhiteSpace(ch))) {   // '>'
+                return source.slice(start, index);
+            }
+
+            ++index;
+        }
+
+    }
+
+
+    function jasteParseTagAttributeValue() {
+        var start = index, ch, first = true;
+
+        ch = source.charCodeAt(index);
+        ++index;
+
+        if (ch === 39) { // single quote (')
+            jasteParseTagAttributeValueData(ch);
+        } else if (ch === 34) { // double quote (")
+            jasteParseTagAttributeValueData(ch);
+        } else {
+            jasteParseTagAttributeValueData(null);
+        }
+    }
+
+    /**
+     * @returns attribute name, or empty string if unable to read it
+     */
+    function jasteParseTagAttributeName() {
+        var start = index, ch, first = true;
+        while (index < length) {
+            ch = source.charCodeAt(index);
+
+            // this is for the special case: <div ===>
+            if (first && ch === 61) // '='
+                continue;
+
+            if (ch === 62 || ch === 61 || isWhiteSpace(ch)) { // '>', '='
+                return source.slice(start, index);
+            }
+
+            ++index;
+            first = false;
+        }
+    }
+
+    /**
+     * @returns true if attribute was consumed, or false if it is the last attribute
+     */
+    function jasteParseTagAttribute() {
+        var ch, attributeName, attributeValue;
+        jasteSkipSpaces(true);
+        attributeName = jasteParseTagAttributeName();
+
+        if (attributeName === '')
+            return false;
+
+        jasteSkipSpaces(true);
+
+        ch = source.charCodeAt(index);
+        if (ch !== 61) { // '='
+            return true;
+        }
+        ++index;
+        jasteSkipSpaces(true);
+        attributeValue = jasteParseTagAttributeValue();
+        return true;
+    }
+
+    function jasteParseTagAttributes() {
+        var start = index, ch;
+
+        jasteSkipSpaces(true);
+        while(jasteParseTagAttribute()) { /**/ };
+    }
+
+    /**
+     *
+     * @param root
+     * @returns tag name, or empty string if unable to read it
+     */
+    function jasteParseTagName() {
+        var start = index, ch;
+        while (index < length) {
+            ch = source.charCodeAt(index);
+
+            if (ch === 62 || isWhiteSpace(ch)) { // '>'
+                return source.slice(start, index);
+            }
+
+            ++index;
+        }
+
+        return '';
+    }
+
+    function jasteParseTagContent(endTagName, level) {
+        var ch;
+        var start = index;
+
+        while (index < length) {
+            ch = source.charCodeAt(index);
+
+            if (ch === 60) { // 47 is '<'
+                var ch1 = source.charCodeAt(index + 1);
+                var ch2 = source.charCodeAt(index + 2);
+                var ch3 = source.charCodeAt(index + 3);
+                if (ch1 === 33 && ch2 === 45 && ch3 === 45) {  // '!', '-', '-'
+                    index += 4;
+                    jasteSkipMultiLineComment();
+                } else {
+                    var level = jasteParseTag(endTagName, level);
+
+                    if (level === 0)
+                        break;
+
+                    continue;
+                }
+            }
+
+            ++index;
+        }
+    }
+
+    /**
+     *
+     * @param root means that this tag is a top most tag in heirarchy
+     */
+    function jasteParseTag(endTagName, level) {
+        // 'index' is looking to open '<' symbol
+        var start = index, tagNameStart, ch, tagName, endTag = false;
+
+        jasteExpect('<');
+
+        ch = source.charCodeAt(index);
+
+        if (ch === 47) { // '/'
+            endTag = true;
+            ++index;
+        }
+
+        tagName = jasteParseTagName();
+
+        if (endTagName === null) {
+            endTagName = tagName;
+        }
+
+        if (endTag === true && tagName === endTagName)
+            --level;
+        else if (endTag === false && tagName === endTagName)
+            ++level;
+
+        jasteParseTagAttributes();
+        jasteExpect('>');
+
+        if (!endTag)
+            jasteParseTagContent(endTagName, level);
+
+        return level;
+    }
+
+
+    function parseTextStatement() {
+
+    }
+
+    function parseTextStatements() {
+
+    }
+
+    function parseTextStatements_TOREMOVE(endTag) {
+        var ch, ch2, text, start = index;
+
+        while (index < length) {
+            ch = source.charCodeAt(index);
+            ch2 = source.charCodeAt(index + 1);
+            if (isLineTerminator(ch)) {
+                if (ch === 13 && source.charCodeAt(index + 1) === 10) {
+                    ++index;
+                }
+                ++lineNumber;
+                ++index;
+                lineStart = index;
+                if (index >= length) {
+                    throwError({}, Messages.UnexpectedToken, 'ILLEGAL');
+                }
+            } else if (ch === 60 && ch2 === 47) {  // '<' is #60 and '/' is 47
+                var ch3 = source.charCodeAt(index + 2);
+                var ch4 = source.charCodeAt(index + 3);
+                var ch5 = source.charCodeAt(index + 4);
+                var ch6 = source.charCodeAt(index + 5);
+                var ch7 = source.charCodeAt(index + 6);
+
+                if (ch3 === 116 && ch4 === 101 && ch5 == 120 && ch6 === 116 && ch7 === 62) { // text>
+                    text = source.slice(start, index);
+                    index += 7;
+                    return delegate.createJasteTextStatement(text);
                 }
             } else {
                 ++index;
             }
         }
+    }
 
-        if (text === undefined)
-            throwError({}, Messages.UnexpectedToken, 'ILLEGAL');
+    function parseTextBlockStatement() {
+        var text;
 
-        //expect('>');
+        skipComment(); // do we need this?
+        delegate.markStart();
 
-        extra.program += "\nbuilder.write('" + text + "');\n";
+        var start = index, loc, ch, comment, token, statements;
 
-        return delegate.markEnd(delegate.createTextStatement(text));
+        jasteParseTag(null, 0);
+
+        return delegate.markEnd(delegate.createJasteTextBlockStatement([]));
+/*
+        var result = readTextTagName(start);
+
+        if (result.name === "text") {
+
+            if (!extra.tokenize) {
+                // Pop the previous token, which is likely '<'
+                if (extra.tokens.length > 0) {
+                    token = extra.tokens[extra.tokens.length - 1];
+                    if (token.type === 'Punctuator') {
+                        if (token.value === '<') {
+                            extra.tokens.pop();
+                        }
+                    }
+                }
+
+                extra.tokens.push({
+                    type: 'JasteTextBlockStart',
+                    value: result.name,
+                    range: [1, 1],
+                    loc: { nothing : "here" }
+                });
+            }
+
+            index = result.end;
+            statements = parseTextStatements("text");
+
+        }*/
+
+        return delegate.markEnd(delegate.createJasteTextBlockStatement(statements));
+
+//        if (text === undefined)
+//            throwError({}, Messages.UnexpectedToken, 'ILLEGAL');
+//        //expect('>');
+//        extra.program += "\nbuilder.write('" + text + "');\n";
     }
 
 
@@ -3222,7 +3584,8 @@ parseStatement: true, parseSourceElement: true */
 
     // 12 Statements
 
-    function parseStatement() {
+    function parseStatement(inBlock) {
+        inBlock = inBlock || false;
         var type = lookahead.type,
             expr,
             labeledBody,
@@ -3244,7 +3607,8 @@ parseStatement: true, parseSourceElement: true */
             case '(':
                 return delegate.markEnd(parseExpressionStatement());
             case '<':
-                return delegate.markEnd(parseText());
+                if (inBlock)
+                    return delegate.markEnd(parseTextBlockStatement());
             default:
                 break;
             }
@@ -3356,7 +3720,7 @@ parseStatement: true, parseSourceElement: true */
             if (match('}')) {
                 break;
             }
-            sourceElement = parseSourceElement();
+            sourceElement = parseSourceElement(true);
             if (typeof sourceElement === 'undefined') {
                 break;
             }
@@ -3514,7 +3878,8 @@ parseStatement: true, parseSourceElement: true */
 
     // 14 Program
 
-    function parseSourceElement() {
+    function parseSourceElement(inBlock) {
+        inBlock = inBlock || false;
         if (lookahead.type === Token.Keyword) {
             switch (lookahead.value) {
             case 'const':
@@ -3523,12 +3888,12 @@ parseStatement: true, parseSourceElement: true */
             case 'function':
                 return parseFunctionDeclaration();
             default:
-                return parseStatement();
+                return parseStatement(inBlock);
             }
         }
 
         if (lookahead.type !== Token.EOF) {
-            return parseStatement();
+            return parseStatement(inBlock);
         }
     }
 
@@ -3561,7 +3926,7 @@ parseStatement: true, parseSourceElement: true */
         }
 
         while (index < length) {
-            sourceElement = parseSourceElement();
+            sourceElement = parseSourceElement(true);
             if (typeof sourceElement === 'undefined') {
                 break;
             }

@@ -17,7 +17,7 @@ var app =
 
 app =
     'var a = 50;\n' +
-    '< hello >';
+    '<text> z <text>hohoh </text>hello </text>';
 
 
 //app =
